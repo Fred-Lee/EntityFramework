@@ -23,7 +23,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
     public class ExpressionPrinter : ExpressionVisitorBase, IExpressionPrinter
     {
         private readonly IndentedStringBuilder _stringBuilder;
-        private readonly List<IConstantPrinter> _constantPrinters;
+        private readonly List<ConstantPrinterBase> _constantPrinters;
         private readonly Dictionary<ParameterExpression, string> _parametersInScope;
 
         private readonly Dictionary<ExpressionType, string> _binaryOperandMap = new Dictionary<ExpressionType, string>
@@ -52,7 +52,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         ///     directly from your code. This API may change or be removed in future releases.
         /// </summary>
         public ExpressionPrinter()
-            : this(new List<IConstantPrinter>())
+            : this(new List<ConstantPrinterBase>())
         {
         }
 
@@ -60,13 +60,13 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
         ///     directly from your code. This API may change or be removed in future releases.
         /// </summary>
-        protected ExpressionPrinter(List<IConstantPrinter> constantPrinters)
+        protected ExpressionPrinter(List<ConstantPrinterBase> constantPrinters)
         {
             _stringBuilder = new IndentedStringBuilder();
             _parametersInScope = new Dictionary<ParameterExpression, string>();
-            _constantPrinters = new List<IConstantPrinter>(constantPrinters);
+            _constantPrinters = new List<ConstantPrinterBase>(constantPrinters);
             _constantPrinters.AddRange(
-                new List<IConstantPrinter>
+                new List<ConstantPrinterBase>
                 {
                     new EntityQueryableConstantPrinter(),
                     new CollectionConstantPrinter(),
@@ -85,35 +85,62 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
         ///     directly from your code. This API may change or be removed in future releases.
         /// </summary>
-        protected static Action<IndentedStringBuilder, string> Append
+        public virtual bool RemoveFormatting { get; set; }
+
+        /// <summary>
+        ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
+        ///     directly from your code. This API may change or be removed in future releases.
+        /// </summary>
+        public virtual int? CharacterLimit { get; set; }
+
+        /// <summary>
+        ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
+        ///     directly from your code. This API may change or be removed in future releases.
+        /// </summary>
+        protected virtual Action<IndentedStringBuilder, string> Append => (sb, s) => sb.Append(s);
+
+        /// <summary>
+        ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
+        ///     directly from your code. This API may change or be removed in future releases.
+        /// </summary>
+        protected virtual Action<IndentedStringBuilder, string> AppendLine
         {
-            get { return (sb, s) => sb.Append(s); }
+            get
+            {
+                if (RemoveFormatting)
+                {
+                    return (sb, s) => sb.Append(string.IsNullOrEmpty(s) ? " " : s);
+                }
+
+                return (sb, s) => sb.AppendLine(s);
+            }
         }
 
         /// <summary>
         ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
         ///     directly from your code. This API may change or be removed in future releases.
         /// </summary>
-        protected static Action<IndentedStringBuilder, string> AppendLine
-        {
-            get { return (sb, s) => sb.AppendLine(s); }
-        }
-
-        /// <summary>
-        ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
-        ///     directly from your code. This API may change or be removed in future releases.
-        /// </summary>
-        public virtual string Print(Expression expression)
+        public virtual string Print(Expression expression, bool removeFormatting = false, int? characterLimit = null)
         {
             _stringBuilder.Clear();
             _parametersInScope.Clear();
+                 
+            RemoveFormatting = removeFormatting;
+            CharacterLimit = characterLimit;
 
             Visit(expression);
 
             var queryPlan = PostProcess(_stringBuilder.ToString());
 
-            var result = "TRACKED: " + TrackedQuery + Environment.NewLine;
+            var result = "TRACKED: " + TrackedQuery + (removeFormatting ? " " : Environment.NewLine);
             result += queryPlan;
+
+            if (characterLimit != null && characterLimit.Value > 0)
+            {
+                result = result.Length > characterLimit
+                    ? result.Substring(0, characterLimit.Value) + "..."
+                    : result;
+            }
 
             return result;
         }
@@ -130,6 +157,11 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         /// </summary>
         public override Expression Visit([NotNull] Expression node)
         {
+            if (CharacterLimit != null && _stringBuilder.Length > CharacterLimit.Value)
+            {
+                return node;
+            }
+
             switch (node.NodeType)
             {
                 case ExpressionType.AndAlso:
@@ -267,8 +299,8 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         /// </summary>
         protected override Expression VisitBlock(BlockExpression node)
         {
-            _stringBuilder.AppendLine();
-            _stringBuilder.AppendLine("{");
+            AppendLine(_stringBuilder, "");
+            AppendLine(_stringBuilder, "{");
             _stringBuilder.IncrementIndent();
 
             foreach (var variable in node.Variables)
@@ -286,16 +318,16 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
             foreach (var expression in expressions)
             {
                 Visit(expression);
-                _stringBuilder.AppendLine();
+                AppendLine(_stringBuilder, "");
             }
 
             if (node.Result != null)
             {
-                _stringBuilder.AppendLine("return " + node.Result);
+                AppendLine(_stringBuilder, "return " + node.Result);
             }
 
             _stringBuilder.DecrementIndent();
-            _stringBuilder.AppendLine("}");
+            AppendLine(_stringBuilder, "}");
 
             return node;
         }
@@ -327,7 +359,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         {
             foreach (var constantPrinter in _constantPrinters)
             {
-                if (constantPrinter.TryPrintConstant(node.Value, _stringBuilder))
+                if (constantPrinter.TryPrintConstant(node.Value, _stringBuilder, RemoveFormatting))
                 {
                     break;
                 }
@@ -342,7 +374,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         /// </summary>
         protected override Expression VisitGoto(GotoExpression node)
         {
-            _stringBuilder.AppendLine("return (" + node.Target.Type.ShortDisplayName() + ")" + node.Target + " {");
+            AppendLine(_stringBuilder, "return (" + node.Target.Type.ShortDisplayName() + ")" + node.Target + " {");
             _stringBuilder.IncrementIndent();
 
             Visit(node.Value);
@@ -439,12 +471,12 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
                 else
                 {
                     ////throw new NotSupportedException(CoreStrings.InvalidMemberInitBinding);
-                    _stringBuilder.AppendLine(CoreStrings.InvalidMemberInitBinding);
+                    AppendLine(_stringBuilder, CoreStrings.InvalidMemberInitBinding);
                 }
             }
 
             _stringBuilder.DecrementIndent();
-            _stringBuilder.AppendLine("}");
+            AppendLine(_stringBuilder, "}");
 
             return node;
         }
@@ -563,7 +595,7 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
             }
 
             _stringBuilder.DecrementIndent();
-            _stringBuilder.AppendLine("}");
+            AppendLine(_stringBuilder, "}");
 
             return node;
         }
@@ -689,24 +721,36 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
         }
 
         private void UnhandledExpressionType(Expression e)
-            => _stringBuilder.AppendLine(e);
+            => AppendLine(_stringBuilder, e.ToString());
 
         /// <summary>
         ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
         ///     directly from your code. This API may change or be removed in future releases.
         /// </summary>
-        protected interface IConstantPrinter
+        protected abstract class ConstantPrinterBase
         {
             /// <summary>
             ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
             ///     directly from your code. This API may change or be removed in future releases.
             /// </summary>
-            bool TryPrintConstant([CanBeNull] object value, [NotNull] IndentedStringBuilder stringBuilder);
+            public abstract bool TryPrintConstant([CanBeNull] object value, [NotNull] IndentedStringBuilder stringBuilder, bool removeFormatting);
+
+            /// <summary>
+            ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
+            ///     directly from your code. This API may change or be removed in future releases.
+            /// </summary>
+            protected virtual Action<IndentedStringBuilder, string> Append => (sb, s) => sb.Append(s);
+
+            /// <summary>
+            ///     This API supports the Entity Framework Core infrastructure and is not intended to be used
+            ///     directly from your code. This API may change or be removed in future releases.
+            /// </summary>
+            protected virtual Action<IndentedStringBuilder, string> AppendLine => (sb, s) => sb.AppendLine(s);
         }
 
-        private class EntityQueryableConstantPrinter : IConstantPrinter
+        private class EntityQueryableConstantPrinter : ConstantPrinterBase
         {
-            public bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder)
+            public override bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder, bool removeFormatting)
             {
                 if (value != null
                     && value.GetType().GetTypeInfo().IsGenericType
@@ -720,15 +764,15 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
             }
         }
 
-        private class CollectionConstantPrinter : IConstantPrinter
+        private class CollectionConstantPrinter : ConstantPrinterBase
         {
-            public bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder)
+            public override bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder, bool removeFormatting)
             {
                 var enumerable = value as IEnumerable;
                 if ((enumerable != null)
                     && !(value is string))
                 {
-                    var appendAction = value is byte[] ? Append : AppendLine;
+                    var appendAction = value is byte[] || removeFormatting ? Append : AppendLine;
 
                     appendAction(stringBuilder, value.GetType().ShortDisplayName() + " ");
                     appendAction(stringBuilder, "{ ");
@@ -748,9 +792,9 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
             }
         }
 
-        private class MetadataPropertyPrinter : IConstantPrinter
+        private class MetadataPropertyPrinter : ConstantPrinterBase
         {
-            public bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder)
+            public override bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder, bool removeFormatting)
             {
                 var property = value as Property;
                 if (property != null)
@@ -764,9 +808,9 @@ namespace Microsoft.EntityFrameworkCore.Query.Internal
             }
         }
 
-        private class DefaultConstantPrinter : IConstantPrinter
+        private class DefaultConstantPrinter : ConstantPrinterBase
         {
-            public bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder)
+            public override bool TryPrintConstant(object value, IndentedStringBuilder stringBuilder, bool removeFormatting)
             {
                 var stringValue = "null";
 

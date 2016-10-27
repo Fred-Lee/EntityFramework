@@ -451,6 +451,7 @@
     <Compile Include="Query\ExpressionVisitors\Internal\ProjectionExpressionVisitorFactory.cs" />
     <Compile Include="Query\ExpressionVisitors\Internal\QuerySourceTracingExpressionVisitor.cs" />
     <Compile Include="Query\ExpressionVisitors\Internal\QuerySourceTracingExpressionVisitorFactory.cs" />
+    <Compile Include="Query\ExpressionVisitors\Internal\RecursiveQueryModelVisitorBase.cs" />
     <Compile Include="Query\ExpressionVisitors\Internal\ReducingExpressionVisitor.cs" />
     <Compile Include="Query\ExpressionVisitors\Internal\RequiresMaterializationExpressionVisitor.cs" />
     <Compile Include="Query\ExpressionVisitors\Internal\RequiresMaterializationExpressionVisitorFactory.cs" />

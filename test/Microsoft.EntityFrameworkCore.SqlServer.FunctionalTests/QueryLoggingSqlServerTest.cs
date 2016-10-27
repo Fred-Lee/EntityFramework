@@ -30,10 +30,10 @@ namespace Microsoft.EntityFrameworkCore.SqlServer.FunctionalTests
                 Assert.NotNull(customers);
                 Assert.StartsWith(
                     @"    Compiling query model: 
-'from Customer <generated>_0 in DbSet<Customer>
+'from Customer <generated>_0 in DbSet<Customer> 
 select <generated>_0'
     Optimized query model: 
-'from Customer <generated>_0 in DbSet<Customer>
+'from Customer <generated>_0 in DbSet<Customer> 
 select <generated>_0'
     TRACKED: True
 (QueryContext queryContext) => IEnumerable<Customer> _ShapedQuery(
@@ -94,11 +94,11 @@ select <generated>_0'
 
                 Assert.NotNull(customers);
                 Assert.StartsWith(@"    Compiling query model: 
-'(from Customer c in DbSet<Customer>
+'(from Customer c in DbSet<Customer> 
 select c)
 .Include(""Orders"")'
     Optimized query model: 
-'from Customer c in DbSet<Customer>
+'from Customer c in DbSet<Customer> 
 select c'
     Including navigation: 'c.Orders'
     TRACKED: True
@@ -145,7 +145,7 @@ select c'
                     TestSqlLoggerFactory.Log.Replace(Environment.NewLine, FileLineEnding));
             }
         }
-
+    
         private readonly NorthwindQuerySqlServerFixture _fixture;
 
         public QueryLoggingSqlServerTest(NorthwindQuerySqlServerFixture fixture)
